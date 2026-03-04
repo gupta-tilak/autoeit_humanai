@@ -185,6 +185,39 @@ class AutoEITPipeline:
         logger.info("ASR backend ready: %s", self._asr.backend_name)
         logger.info("Model info: %s", self._asr.model_info)
 
+    def _run_full_file_asr(self, wav_path: str) -> List[Dict[str, Any]]:
+        """Run ASR on the full preprocessed audio to get word-level timestamps.
+
+        Returns a list of dicts: [{"word": str, "start": float, "end": float}, ...]
+        """
+        logger.info("Running full-file ASR on: %s", wav_path)
+        t0 = time.time()
+
+        asr_result = self._asr.transcribe(
+            wav_path,
+            language=self.config.asr.language,
+            initial_prompt=self.config.asr.initial_prompt,
+            temperature=0.0,
+            beam_size=self.config.asr.beam_size,
+        )
+
+        # Extract word-level timeline from ASR segments
+        word_timeline: List[Dict[str, Any]] = []
+        for seg in asr_result.segments:
+            for w in seg.words:
+                word_timeline.append({
+                    "word": w.get("word", w) if isinstance(w, dict) else str(w),
+                    "start": w.get("start", 0.0) if isinstance(w, dict) else 0.0,
+                    "end": w.get("end", 0.0) if isinstance(w, dict) else 0.0,
+                })
+
+        elapsed = time.time() - t0
+        logger.info(
+            "Full-file ASR done: %d words, %.1fs (transcript: %d chars)",
+            len(word_timeline), elapsed, len(asr_result.text),
+        )
+        return word_timeline
+
     def _process_participant(self, af: AudioFileConfig) -> ParticipantResult:
         """Full pipeline for one participant."""
         logger.info("-" * 50)
@@ -213,19 +246,41 @@ class AutoEITPipeline:
         )
         logger.info("Preprocessed: %.1fs audio", len(audio) / sr)
 
-        # 2. Segment audio
-        segments = segment_audio(audio, sr, self.config.segmentation)
+        # 2. Full-file ASR (provides word-level timestamps for segmentation)
+        word_timeline = self._run_full_file_asr(wav_path)
+        logger.info("Full-file ASR: %d words with timestamps", len(word_timeline))
+
+        # 3. Segment audio (with word timeline for text-matching strategy)
+        segments = segment_audio(audio, sr, self.config.segmentation, word_timeline=word_timeline)
         result.segments_found = len(segments)
-        result.segmentation_method = "hybrid"
+        result.segmentation_method = "phase1_vad_tone_textmatch"
         logger.info("Segmented: %d segments found", len(segments))
 
-        # 3. Transcribe each segment
+        # 4. Transcribe each segment
+        # Always use per-segment ASR for primary transcription.
+        # Full-file ASR pre_transcription is used as fallback when
+        # per-segment ASR produces [no response] but pre_transcription has text.
         transcriptions = []
         for seg in segments:
             trans = self._transcribe_segment(seg, af)
+
+            # Fallback: if per-segment ASR gave no_response but full-file
+            # ASR detected text in this window, override with that text.
+            if (
+                trans.raw_transcription.strip() == ""
+                and seg.pre_transcription
+                and seg.notes != "no_response"
+            ):
+                logger.debug(
+                    "Sentence %d: per-segment ASR empty, using full-file pre-trans",
+                    seg.sentence_number,
+                )
+                trans.raw_transcription = seg.pre_transcription
+                trans.transcription = ""  # will be set by post-processing
+
             transcriptions.append(trans)
 
-        # 4. Post-process
+        # 5. Post-process
         for trans in transcriptions:
             idx = trans.sentence_number - 1
             stimulus = TARGET_SENTENCES[idx] if 0 <= idx < len(TARGET_SENTENCES) else ""
