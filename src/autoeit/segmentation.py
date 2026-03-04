@@ -6,12 +6,13 @@ from each EIT recording, separating them from stimulus playback and silence.
 EIT structure (per item):
   Native stimulus (~3-8s) → Tone beep (~0.5s) → Participant response (~2-10s) → Silence (~5-10s)
 
-Strategy (hybrid):
-  1. Detect tones (reliable ~1kHz beeps between stimulus and response)
-  2. Detect non-silent regions
-  3. Classify each speech region as stimulus or response based on position relative to tones
-  4. Validate: expect exactly 30 response segments
-  5. Fallback: use Whisper full-file pass to match known stimuli and infer response boundaries
+Strategy:
+  1. Detect non-silent speech regions in the audio
+  2. Detect tone beeps (~1kHz) that mark the boundary between stimulus and response
+  3. Group nearby speech regions into "items" separated by long silence gaps
+  4. Within each item, split into stimulus portion (before tone) and response portion (after tone)
+  5. Sort all response segments chronologically and number them 1-N
+  6. Validate against expected count (30)
 """
 
 from __future__ import annotations
@@ -48,8 +49,12 @@ def segment_audio(
 ) -> List[AudioSegment]:
     """Extract 30 participant response segments from preprocessed audio.
 
-    This is the main entry point. It tries multiple strategies in order
-    of reliability and falls back as needed.
+    This is the main entry point. It uses a group-based approach:
+    1. Detect all non-silent speech regions
+    2. Detect tone beeps
+    3. Group nearby regions into EIT "items" (separated by silence gaps)
+    4. Within each item, extract the response portion (after the tone)
+    5. Sort chronologically, number 1-N
 
     Parameters
     ----------
@@ -63,12 +68,13 @@ def segment_audio(
     Returns
     -------
     List[AudioSegment]
-        Exactly 30 response segments (or best effort if validation fails).
+        Response segments sorted chronologically, numbered 1-N.
     """
-    logger.info("Starting segmentation (%.1fs audio @ %dHz)", len(audio) / sr, sr)
+    total_duration = len(audio) / sr
+    logger.info("Starting segmentation (%.1fs audio @ %dHz)", total_duration, sr)
 
     # ------------------------------------------------------------------
-    # Step 1: Detect tones
+    # Step 1: Detect tone beeps
     # ------------------------------------------------------------------
     tones = detect_tones(audio, sr, config)
     logger.info("Detected %d tone events", len(tones))
@@ -79,42 +85,35 @@ def segment_audio(
     speech_regions = detect_non_silent(audio, sr, config)
     logger.info("Detected %d non-silent regions", len(speech_regions))
 
-    # ------------------------------------------------------------------
-    # Step 3: Try tone-based segmentation (most reliable)
-    # ------------------------------------------------------------------
-    if len(tones) >= config.expected_segments * 0.7:  # at least 70% of expected tones
-        logger.info("Using tone-based segmentation (%d tones found)", len(tones))
-        responses = extract_responses_from_tones(audio, sr, tones, speech_regions, config)
-        if _validate_segments(responses, config):
-            return responses
-        logger.warning(
-            "Tone-based segmentation produced %d segments (expected %d) — trying hybrid",
-            len(responses), config.expected_segments,
-        )
+    if len(speech_regions) == 0:
+        logger.warning("No non-silent regions detected!")
+        return []
 
     # ------------------------------------------------------------------
-    # Step 4: Hybrid — use speech regions + pattern matching
+    # Step 3: Group nearby regions into EIT "items"
     # ------------------------------------------------------------------
-    logger.info("Using hybrid segmentation (speech regions + pattern analysis)")
-    responses = extract_responses_hybrid(audio, sr, speech_regions, tones, config)
-    if _validate_segments(responses, config):
-        return responses
-
-    logger.warning(
-        "Hybrid segmentation produced %d segments (expected %d) — trying silence-only",
-        len(responses), config.expected_segments,
-    )
+    items = _group_into_items(speech_regions, sr, config, tones)
+    logger.info("Grouped into %d EIT items", len(items))
 
     # ------------------------------------------------------------------
-    # Step 5: Fallback — pure silence-based with alternating heuristic
+    # Step 4: Extract response from each item
     # ------------------------------------------------------------------
-    logger.info("Falling back to silence-based alternating segmentation")
-    responses = extract_responses_silence_alternating(audio, sr, speech_regions, config)
+    responses = _extract_responses_from_items(audio, sr, items, tones, config)
+    logger.info("Extracted %d response segments", len(responses))
+
+    # ------------------------------------------------------------------
+    # Step 5: Sort chronologically and assign sentence numbers
+    # ------------------------------------------------------------------
+    responses.sort(key=lambda s: s.start_s)
+    for i, seg in enumerate(responses):
+        seg.sentence_number = i + 1
 
     if len(responses) != config.expected_segments:
         logger.warning(
-            "Final segmentation: %d segments (expected %d). Results may need manual review.",
-            len(responses), config.expected_segments,
+            "Got %d segments, expected %d%s",
+            len(responses),
+            config.expected_segments,
+            " (within tolerance)" if abs(len(responses) - config.expected_segments) <= 2 else "",
         )
 
     return responses
@@ -131,7 +130,8 @@ def detect_tones(
 ) -> List[Tuple[int, int]]:
     """Detect tone beeps (~1kHz) in the audio.
 
-    Returns list of (start_sample, end_sample) for each detected tone.
+    Uses bandpass filtering + envelope detection with relaxed thresholds
+    for better recall. Returns list of (start_sample, end_sample).
     """
     from scipy import signal as scipy_signal
 
@@ -139,12 +139,10 @@ def detect_tones(
     min_duration = config.tone_min_duration_ms / 1000.0
     max_duration = config.tone_max_duration_ms / 1000.0
 
-    # Short-time energy in the tone frequency band
-    # Bandpass filter around the tone frequency (±200 Hz)
-    low_freq = max(target_freq - 200, 100)
-    high_freq = min(target_freq + 200, sr / 2 - 1)
+    # Bandpass filter around the tone frequency (±300 Hz for wider capture)
+    low_freq = max(target_freq - 300, 100)
+    high_freq = min(target_freq + 300, sr / 2 - 1)
 
-    # Design bandpass filter
     nyq = sr / 2.0
     b, a = scipy_signal.butter(
         4,
@@ -163,30 +161,37 @@ def detect_tones(
         kernel = np.ones(win_size) / win_size
         envelope = np.convolve(envelope, kernel, mode="same")
 
-    # Threshold: tone regions have high energy in the band
-    threshold = np.percentile(envelope, 95) * 0.3  # adaptive threshold
-    if threshold < 0.01:
-        threshold = 0.01
+    # Adaptive threshold — use a lower percentile for better recall
+    threshold = np.percentile(envelope, 90) * 0.25
+    threshold = max(threshold, 0.005)
 
     # Find contiguous regions above threshold
     above = envelope > threshold
     tone_regions = _contiguous_regions(above)
 
-    # Filter by duration
+    # Filter by duration and tonal quality
     tones = []
     for start, end in tone_regions:
         duration = (end - start) / sr
         if min_duration <= duration <= max_duration:
-            # Verify it's actually tonal (high spectral purity)
             segment = audio[start:end]
             if _is_tonal(segment, sr, target_freq):
                 tones.append((start, end))
 
+    # Merge tones that are very close together (within 100ms) — sometimes
+    # a single beep gets split by envelope dips
+    tones = _merge_close_regions(tones, min_gap=int(0.1 * sr))
+
     return tones
 
 
-def _is_tonal(segment: np.ndarray, sr: int, expected_freq: float, tolerance: float = 300.0) -> bool:
-    """Check if a segment is a pure tone near the expected frequency."""
+def _is_tonal(segment: np.ndarray, sr: int, expected_freq: float, tolerance: float = 400.0) -> bool:
+    """Check if a segment is a pure tone near the expected frequency.
+
+    Uses a relaxed tolerance (400Hz) and lower spectral purity threshold (0.1)
+    to improve recall — we'd rather detect a few false tones and filter later
+    than miss real tones.
+    """
     if len(segment) < 256:
         return False
 
@@ -212,7 +217,7 @@ def _is_tonal(segment: np.ndarray, sr: int, expected_freq: float, tolerance: flo
     mask = (freqs >= peak_freq - 100) & (freqs <= peak_freq + 100)
     peak_energy = np.sum(fft_vals[mask] ** 2)
 
-    return (peak_energy / total_energy) > 0.2
+    return (peak_energy / total_energy) > 0.1
 
 
 # ---------------------------------------------------------------------------
@@ -272,66 +277,208 @@ def detect_non_silent(
 
 
 # ---------------------------------------------------------------------------
-# Response extraction strategies
+# Item grouping and response extraction
 # ---------------------------------------------------------------------------
 
-def extract_responses_from_tones(
+@dataclass
+class _EITItem:
+    """An EIT item: one stimulus-tone-response cycle."""
+    regions: List[Tuple[int, int]]   # non-silent regions in this item
+    tone: Optional[Tuple[int, int]]  # tone beep if detected, else None
+    item_start: int                  # earliest sample
+    item_end: int                    # latest sample
+
+
+def _group_into_items(
+    speech_regions: List[Tuple[int, int]],
+    sr: int,
+    config: SegmentationConfig,
+    tones: List[Tuple[int, int]],
+) -> List[_EITItem]:
+    """Group speech regions into EIT items based on silence gaps.
+
+    Each EIT item (stimulus+tone+response) is separated from the next by
+    a substantial silence gap (typically 2-6s). Within an item, the
+    stimulus, tone, and response may be close together or even merged
+    into one region.
+
+    We use an adaptive gap threshold: compute gaps between consecutive
+    non-silent regions and look for the natural break points.
+    """
+
+    if len(speech_regions) < 2:
+        return [_EITItem(
+            regions=speech_regions,
+            tone=None,
+            item_start=speech_regions[0][0] if speech_regions else 0,
+            item_end=speech_regions[0][1] if speech_regions else 0,
+        )]
+
+    # ---- Compute gaps between consecutive regions ----
+    gaps = []
+    for i in range(len(speech_regions) - 1):
+        gap_start = speech_regions[i][1]
+        gap_end = speech_regions[i + 1][0]
+        gap_s = (gap_end - gap_start) / sr
+        gaps.append(gap_s)
+
+    # ---- Find adaptive gap threshold ----
+    # We expect ~30 items over the audio, so ~29 big gaps.
+    # Sort gaps and look for a natural break.
+    sorted_gaps = sorted(gaps, reverse=True)
+
+    # Target: ~expected_segments items, so ~(expected_segments - 1) splits
+    target_splits = config.expected_segments - 1
+
+    if len(sorted_gaps) > target_splits:
+        # Use the gap between the target_splits-th and (target_splits+1)-th
+        # largest gaps as the threshold
+        gap_threshold_s = (sorted_gaps[target_splits - 1] + sorted_gaps[target_splits]) / 2.0
+        # But enforce a minimum (at least 2s gap to be an item boundary)
+        gap_threshold_s = max(gap_threshold_s, 2.0)
+    else:
+        # Fewer gaps than expected — use a fixed threshold
+        gap_threshold_s = 2.0
+
+    logger.debug("Gap threshold: %.2fs (gaps range: %.2f - %.2fs)",
+                 gap_threshold_s, min(gaps), max(gaps))
+
+    # ---- Group regions by gap threshold ----
+    groups: List[List[Tuple[int, int]]] = [[speech_regions[0]]]
+    for i, gap in enumerate(gaps):
+        if gap >= gap_threshold_s:
+            groups.append([speech_regions[i + 1]])
+        else:
+            groups[-1].append(speech_regions[i + 1])
+
+    # ---- Build EITItem objects, attaching tones ----
+    items: List[_EITItem] = []
+    for group in groups:
+        item_start = group[0][0]
+        item_end = group[-1][1]
+
+        # Find tone within this item's time span (with small margin)
+        margin = int(0.5 * sr)
+        item_tone = None
+        for tone_start, tone_end in tones:
+            if tone_start >= item_start - margin and tone_end <= item_end + margin:
+                item_tone = (tone_start, tone_end)
+                break
+
+        items.append(_EITItem(
+            regions=group,
+            tone=item_tone,
+            item_start=item_start,
+            item_end=item_end,
+        ))
+
+    return items
+
+
+def _extract_responses_from_items(
     audio: np.ndarray,
     sr: int,
+    items: List[_EITItem],
     tones: List[Tuple[int, int]],
-    speech_regions: List[Tuple[int, int]],
     config: SegmentationConfig,
 ) -> List[AudioSegment]:
-    """Extract responses using tone positions as anchors.
+    """Extract the response portion from each EIT item.
 
-    After each tone, the first speech region is the participant response.
+    For each item:
+    - If a tone was detected: response = speech AFTER the tone
+    - If no tone detected but multiple regions: response = last region
+      (stimulus is first, response is last)
+    - If only one region: treat entirety as potential response (might be
+      stimulus-only if participant didn't respond, or might be a merged
+      stimulus+response)
+
+    For single-region items, we try to split on the tone frequency or
+    use duration heuristics.
     """
-    responses = []
     padding_before = int(config.padding_before_ms * sr / 1000)
     padding_after = int(config.padding_after_ms * sr / 1000)
     max_response = int(config.max_response_duration_ms * sr / 1000)
-    min_response = int(config.min_response_duration_ms * sr / 1000)
+    min_response_samples = int(config.min_response_duration_ms * sr / 1000)
 
-    for idx, (tone_start, tone_end) in enumerate(tones):
-        # Look for the first speech region after this tone
-        best_region = None
-        for reg_start, reg_end in speech_regions:
-            # Region must start after the tone ends
-            if reg_start > tone_end:
-                # But not too far away (within 15 seconds)
-                gap_s = (reg_start - tone_end) / sr
-                if gap_s > 15.0:
-                    break  # too far, probably next item's stimulus
-                best_region = (reg_start, reg_end)
-                break
+    responses: List[AudioSegment] = []
 
-        if best_region is None:
-            # No speech after tone — participant didn't respond
-            responses.append(AudioSegment(
-                start_sample=tone_end,
-                end_sample=min(tone_end + sr, len(audio)),
-                start_s=tone_end / sr,
-                end_s=min(tone_end + sr, len(audio)) / sr,
-                segment_type="response",
-                sentence_number=idx + 1,
-                audio=np.zeros(sr, dtype=np.float32),
-                energy_rms=0.0,
-                notes="no_response",
-            ))
+    for item in items:
+        resp_start = None
+        resp_end = None
+        notes = ""
+
+        if item.tone is not None:
+            # -- TONE DETECTED: response is speech after the tone --
+            tone_end_sample = item.tone[1]
+
+            # Find speech regions within this item that start AFTER the tone
+            post_tone_regions = [
+                (s, e) for s, e in item.regions
+                if s >= tone_end_sample - int(0.05 * sr)  # small tolerance
+            ]
+
+            if post_tone_regions:
+                # Merge all post-tone regions into one response
+                resp_start = post_tone_regions[0][0]
+                resp_end = post_tone_regions[-1][1]
+            else:
+                # No speech after tone → no response
+                resp_start = tone_end_sample
+                resp_end = min(tone_end_sample + int(0.5 * sr), len(audio))
+                notes = "no_response"
+
+        elif len(item.regions) >= 2:
+            # -- NO TONE, MULTIPLE REGIONS: last region is likely the response --
+            # (First region = stimulus, last = response)
+            last_region = item.regions[-1]
+            resp_start = last_region[0]
+            resp_end = last_region[1]
+
+        else:
+            # -- SINGLE REGION, NO TONE --
+            # Could be: (a) stimulus only (no response), (b) merged stim+response
+            # Try to split: look for a tone-like event within the region
+            region_start, region_end = item.regions[0]
+            region_duration = (region_end - region_start) / sr
+
+            if region_duration < 2.0:
+                # Very short — likely just stimulus or just response
+                # Use the whole region as a potential response
+                resp_start = region_start
+                resp_end = region_end
+            else:
+                # Longer region — try to find a tonal boundary within it
+                # to split stimulus from response
+                split_point = _find_tone_boundary_in_region(
+                    audio, sr, region_start, region_end, config
+                )
+                if split_point is not None:
+                    resp_start = split_point
+                    resp_end = region_end
+                else:
+                    # No boundary found — use second half as a heuristic
+                    # (stimulus first, response second)
+                    midpoint = (region_start + region_end) // 2
+                    resp_start = midpoint
+                    resp_end = region_end
+
+        if resp_start is None:
             continue
 
-        reg_start, reg_end = best_region
-
         # Apply padding
-        start = max(0, reg_start - padding_before)
-        end = min(len(audio), reg_end + padding_after)
+        start = max(0, resp_start - padding_before)
+        end = min(len(audio), resp_end + padding_after)
 
         # Cap duration
         if end - start > max_response:
             end = start + max_response
 
-        segment_audio = audio[start:end].copy()
-        rms = float(np.sqrt(np.mean(segment_audio ** 2))) if len(segment_audio) > 0 else 0.0
+        seg_audio = audio[start:end].copy()
+        rms = float(np.sqrt(np.mean(seg_audio ** 2))) if len(seg_audio) > 0 else 0.0
+
+        # Check if this is essentially silence (no actual response)
+        if rms < 0.005 and notes != "no_response":
+            notes = "no_response"
 
         responses.append(AudioSegment(
             start_sample=start,
@@ -339,169 +486,70 @@ def extract_responses_from_tones(
             start_s=start / sr,
             end_s=end / sr,
             segment_type="response",
-            sentence_number=idx + 1,
-            audio=segment_audio,
+            sentence_number=0,  # will be set after sorting
+            audio=seg_audio,
             energy_rms=rms,
+            notes=notes,
         ))
 
-    return responses[:config.expected_segments]
+    return responses
 
 
-def extract_responses_hybrid(
+def _find_tone_boundary_in_region(
     audio: np.ndarray,
     sr: int,
-    speech_regions: List[Tuple[int, int]],
-    tones: List[Tuple[int, int]],
+    region_start: int,
+    region_end: int,
     config: SegmentationConfig,
-) -> List[AudioSegment]:
-    """Hybrid segmentation using speech regions and optional tone info.
+) -> Optional[int]:
+    """Look for a tone-like boundary within a single speech region.
 
-    The EIT has a repeating pattern: stimulus → tone → response → silence.
-    Speech regions alternate: stimulus, response, stimulus, response, ...
-
-    We use energy/duration characteristics to distinguish:
-    - Stimuli: consistent energy (pre-recorded native speaker)
-    - Responses: variable energy (non-native participant)
+    Returns the sample position just after the tone, or None if not found.
     """
-    if len(speech_regions) < 2:
-        return []
+    from scipy import signal as scipy_signal
 
-    padding_before = int(config.padding_before_ms * sr / 1000)
-    padding_after = int(config.padding_after_ms * sr / 1000)
-    max_response = int(config.max_response_duration_ms * sr / 1000)
+    segment = audio[region_start:region_end]
+    if len(segment) < int(0.1 * sr):
+        return None
 
-    # Compute features for each speech region
-    features = []
-    for start, end in speech_regions:
-        seg = audio[start:end]
-        rms = float(np.sqrt(np.mean(seg ** 2))) if len(seg) > 0 else 0.0
-        duration = (end - start) / sr
+    target_freq = config.tone_freq_hz
+    low_freq = max(target_freq - 300, 100)
+    high_freq = min(target_freq + 300, sr / 2 - 1)
 
-        # Check if a tone precedes this region (within 5s)
-        preceded_by_tone = False
-        for tone_start, tone_end in tones:
-            gap = (start - tone_end) / sr
-            if 0 < gap < 5.0:
-                preceded_by_tone = True
-                break
+    nyq = sr / 2.0
+    b, a = scipy_signal.butter(4, [low_freq / nyq, high_freq / nyq], btype="band")
+    filtered = scipy_signal.filtfilt(b, a, segment)
+    envelope = np.abs(scipy_signal.hilbert(filtered))
 
-        features.append({
-            "start": start,
-            "end": end,
-            "rms": rms,
-            "duration": duration,
-            "preceded_by_tone": preceded_by_tone,
-        })
+    # Smooth
+    win_size = int(0.02 * sr)
+    if win_size > 0:
+        kernel = np.ones(win_size) / win_size
+        envelope = np.convolve(envelope, kernel, mode="same")
 
-    # Strategy: regions preceded by a tone are responses
-    # Remaining regions are paired: odd-indexed = stimulus, even = response
-    # within each stimulus-response pair
+    # Look for a peak in the tonal envelope
+    threshold = np.percentile(envelope, 80) * 0.5
+    if threshold < 0.003:
+        return None
 
-    responses = []
-    used = set()
+    above = envelope > threshold
+    tone_candidates = _contiguous_regions(above)
 
-    # First pass: tone-preceded regions
-    for i, feat in enumerate(features):
-        if feat["preceded_by_tone"]:
-            responses.append(_make_segment(audio, sr, feat, len(responses) + 1, padding_before, padding_after, max_response))
-            used.add(i)
+    min_dur = config.tone_min_duration_ms / 1000.0
+    max_dur = config.tone_max_duration_ms / 1000.0
 
-    # If we got enough from tones alone
-    if len(responses) >= config.expected_segments:
-        return responses[:config.expected_segments]
+    for start, end in tone_candidates:
+        dur = (end - start) / sr
+        if min_dur * 0.5 <= dur <= max_dur:
+            # Found a tonal region — response starts after it
+            return region_start + end
 
-    # Second pass: alternate remaining regions
-    remaining = [(i, f) for i, f in enumerate(features) if i not in used]
-
-    if len(remaining) >= 2:
-        # Group remaining into pairs (stimulus, response)
-        # The pattern after intro: stimulus → response → stimulus → response → ...
-        # First remaining region is likely a stimulus
-        for pair_idx in range(0, len(remaining) - 1, 2):
-            if len(responses) >= config.expected_segments:
-                break
-            # Second of each pair is the response
-            _, resp_feat = remaining[pair_idx + 1]
-            responses.append(_make_segment(
-                audio, sr, resp_feat, len(responses) + 1,
-                padding_before, padding_after, max_response,
-            ))
-    elif len(remaining) == 1 and len(responses) < config.expected_segments:
-        # Single remaining — might be a response
-        _, feat = remaining[0]
-        responses.append(_make_segment(
-            audio, sr, feat, len(responses) + 1,
-            padding_before, padding_after, max_response,
-        ))
-
-    return responses[:config.expected_segments]
-
-
-def extract_responses_silence_alternating(
-    audio: np.ndarray,
-    sr: int,
-    speech_regions: List[Tuple[int, int]],
-    config: SegmentationConfig,
-) -> List[AudioSegment]:
-    """Fallback: treat every other speech region as a response.
-
-    Assumes the pattern: stimulus(1), response(1), stimulus(2), response(2), ...
-    So indices 1, 3, 5, ... are responses.
-    """
-    padding_before = int(config.padding_before_ms * sr / 1000)
-    padding_after = int(config.padding_after_ms * sr / 1000)
-    max_response = int(config.max_response_duration_ms * sr / 1000)
-
-    responses = []
-    # Try: response at odd indices (0-based: 1, 3, 5, ...)
-    for i in range(1, len(speech_regions), 2):
-        if len(responses) >= config.expected_segments:
-            break
-        start, end = speech_regions[i]
-        seg = audio[start:end]
-        rms = float(np.sqrt(np.mean(seg ** 2))) if len(seg) > 0 else 0.0
-        feat = {"start": start, "end": end, "rms": rms, "duration": (end - start) / sr}
-        responses.append(_make_segment(
-            audio, sr, feat, len(responses) + 1,
-            padding_before, padding_after, max_response,
-        ))
-
-    return responses[:config.expected_segments]
+    return None
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _make_segment(
-    audio: np.ndarray,
-    sr: int,
-    feat: Dict[str, Any],
-    sentence_num: int,
-    padding_before: int,
-    padding_after: int,
-    max_response: int,
-) -> AudioSegment:
-    """Build an AudioSegment from feature dict."""
-    start = max(0, feat["start"] - padding_before)
-    end = min(len(audio), feat["end"] + padding_after)
-    if end - start > max_response:
-        end = start + max_response
-
-    seg_audio = audio[start:end].copy()
-    rms = float(np.sqrt(np.mean(seg_audio ** 2))) if len(seg_audio) > 0 else 0.0
-
-    return AudioSegment(
-        start_sample=start,
-        end_sample=end,
-        start_s=start / sr,
-        end_s=end / sr,
-        segment_type="response",
-        sentence_number=sentence_num,
-        audio=seg_audio,
-        energy_rms=rms,
-    )
-
 
 def _contiguous_regions(mask: np.ndarray) -> List[Tuple[int, int]]:
     """Find contiguous True regions in a boolean array.
@@ -545,18 +593,3 @@ def _merge_close_regions(
             merged.append((start, end))
 
     return merged
-
-
-def _validate_segments(
-    segments: List[AudioSegment],
-    config: SegmentationConfig,
-) -> bool:
-    """Check if segmentation produced the expected number of segments."""
-    n = len(segments)
-    expected = config.expected_segments
-    # Accept within ±2 of expected
-    if abs(n - expected) <= 2:
-        if n != expected:
-            logger.warning("Got %d segments, expected %d (within tolerance)", n, expected)
-        return True
-    return False
