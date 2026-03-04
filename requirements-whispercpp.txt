@@ -1,0 +1,3 @@
+# whisper.cpp Python bindings — Metal-accelerated inference
+# Install with: pip install -r requirements-whispercpp.txt
+pywhispercpp>=1.0.0

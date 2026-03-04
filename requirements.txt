@@ -1,0 +1,31 @@
+# ===================================================================
+# AutoEIT — Core Dependencies
+# ===================================================================
+# Install with: pip install -r requirements.txt
+# For Mac-native MLX support:  pip install -r requirements-mlx.txt
+# For whisper.cpp support:     pip install -r requirements-whispercpp.txt
+# ===================================================================
+
+# --- Audio processing ---
+librosa>=0.10.0
+soundfile>=0.12.0
+noisereduce>=3.0.0
+scipy>=1.10.0
+
+# --- Data handling ---
+numpy>=1.24.0
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# --- Configuration ---
+pyyaml>=6.0
+
+# --- Evaluation ---
+jiwer>=3.0.0
+
+# --- Notebook ---
+jupyter>=1.0.0
+ipykernel>=6.0.0
+matplotlib>=3.7.0
+ipywidgets>=8.0.0
+tqdm>=4.65.0

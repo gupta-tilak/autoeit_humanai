@@ -1,0 +1,125 @@
+# AutoEIT Pipeline Configuration
+# ================================
+# Modify this file to tune the pipeline for different experiments.
+# Each run saves a snapshot of this config for reproducibility.
+
+experiment_name: "baseline_mlx_small"
+experiment_description: "Baseline run using MLX-Whisper small model on Apple Silicon"
+tags:
+  - baseline
+  - mlx
+  - small
+
+# Paths (relative to project root)
+audio_dir: "Sample Audio Files and Transcriptions"
+template_excel: "Sample Audio Files and Transcriptions/AutoEIT Sample Audio for Transcribing.xlsx"
+reference_excel: "Sample Audio Files and Transcriptions/AutoEIT Sample Transcriptions for Scoring.xlsx"
+output_dir: "output"
+experiments_dir: "experiments"
+cache_dir: ".cache"
+
+# Audio file metadata
+audio_files:
+  - participant_id: "038010"
+    eit_version: "2A"
+    filename: "038010_EIT-2A.mp3"
+    sheet_name: "38010-2A"
+    skip_seconds: 150.0
+  - participant_id: "038011"
+    eit_version: "1A"
+    filename: "038011_EIT-1A.mp3"
+    sheet_name: "38011-1A"
+    skip_seconds: 150.0
+  - participant_id: "038012"
+    eit_version: "2A"
+    filename: "038012_EIT-2A.mp3"
+    sheet_name: "38012-2A"
+    skip_seconds: 720.0
+  - participant_id: "038015"
+    eit_version: "1A"
+    filename: "038015_EIT-1A.mp3"
+    sheet_name: "38015-1A"
+    skip_seconds: 150.0
+
+# Audio preprocessing
+preprocessing:
+  sample_rate: 16000
+  channels: 1
+  sample_width: 2
+  normalise_peak_db: -3.0
+  noise_reduce: true
+  noise_reduce_prop_decrease: 0.5
+  noise_reduce_stationary: true
+
+# Segmentation
+segmentation:
+  min_silence_len_ms: 1500
+  silence_thresh_db: -40
+  seek_step_ms: 10
+  tone_freq_hz: 1000.0
+  tone_min_duration_ms: 100
+  tone_max_duration_ms: 2000
+  tone_detection_enabled: true
+  min_response_duration_ms: 200
+  max_response_duration_ms: 15000
+  expected_segments: 30
+  padding_before_ms: 100
+  padding_after_ms: 200
+
+# ASR Configuration
+asr:
+  # Backend: whisper_cpp | mlx_whisper | faster_whisper
+  backend: "mlx_whisper"
+  
+  # Model size: tiny | base | small | medium | large
+  model_size: "small"
+  
+  # Custom model path (for fine-tuned models). Leave null for default.
+  model_path: null
+  
+  language: "es"
+  beam_size: 5
+  best_of: 5
+  temperature: 0.0
+  temperature_fallback: [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+  condition_on_previous_text: false
+  word_timestamps: true
+  vad_filter: true
+  
+  initial_prompt: >-
+    Transcripción de hablantes no nativos de español repitiendo oraciones.
+    Incluir vacilaciones y errores tal como se producen.
+    Ejemplo: Quiero cortarme el pelo. El libro está en la mesa.
+    Después de cenar me fui a dormir tranquilo.
+  
+  # Confidence thresholds
+  low_confidence_threshold: -1.0
+  
+  # Multi-pass
+  multi_pass: true
+  second_pass_temperature: 0.2
+  
+  # whisper.cpp specific (used when backend=whisper_cpp)
+  whisper_cpp_bin: null
+  whisper_cpp_model_path: null
+  whisper_cpp_use_gpu: true
+  whisper_cpp_threads: 4
+  
+  # MLX specific (used when backend=mlx_whisper)
+  mlx_model_repo: "mlx-community/whisper-small-mlx"
+
+# Post-processing
+postprocessing:
+  fix_accents: true
+  remove_hallucinations: true
+  hallucination_repeat_threshold: 3
+  format_disfluencies: true
+  no_response_energy_threshold: 0.01
+  no_response_min_words: 0
+
+# Evaluation
+evaluation:
+  compute_self_consistency: true
+  consistency_temperatures: [0.0, 0.2, 0.4]
+  compute_stimulus_similarity: true
+  report_confidence_scores: true

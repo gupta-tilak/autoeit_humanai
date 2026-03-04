@@ -1,0 +1,3 @@
+# faster-whisper — CTranslate2, works on all platforms
+# Install with: pip install -r requirements-faster-whisper.txt
+faster-whisper>=1.0.0
