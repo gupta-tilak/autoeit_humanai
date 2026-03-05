@@ -23,6 +23,10 @@ pyyaml>=6.0
 # --- Evaluation ---
 jiwer>=3.0.0
 
+# --- Speaker diarization (Phase 2, optional) ---
+# Requires HF token: https://hf.co/pyannote/speaker-diarization-3.1
+pyannote.audio>=3.1.0
+
 # --- Notebook ---
 jupyter>=1.0.0
 ipykernel>=6.0.0

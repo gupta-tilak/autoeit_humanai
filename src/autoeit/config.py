@@ -163,6 +163,20 @@ class PostProcessingConfig:
 
 
 @dataclass
+class DiarizationConfig:
+    """Speaker diarization parameters (pyannote-based, Phase 2)."""
+    enabled: bool = False                        # opt-in — requires HF token
+    hf_token: Optional[str] = None               # HF token or set HUGGINGFACE_TOKEN env var
+    num_speakers: int = 2                        # 0 = auto-detect
+    min_speakers: int = 1
+    max_speakers: int = 4
+    merge_gap_s: float = 0.4                     # merge response turns closer than this
+    min_turn_duration_s: float = 0.3             # discard shorter turns
+    window_after_tone_s: float = 2.0             # window for voting on response speaker
+    model_name: str = "pyannote/speaker-diarization-3.1"
+
+
+@dataclass
 class EvaluationConfig:
     """Self-evaluation parameters."""
     compute_self_consistency: bool = True
@@ -189,6 +203,7 @@ class PipelineConfig:
     segmentation: SegmentationConfig = field(default_factory=SegmentationConfig)
     asr: ASRConfig = field(default_factory=ASRConfig)
     postprocessing: PostProcessingConfig = field(default_factory=PostProcessingConfig)
+    diarization: DiarizationConfig = field(default_factory=DiarizationConfig)
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
 
     # Audio files
@@ -237,6 +252,8 @@ class PipelineConfig:
             d["asr"] = ASRConfig(**d["asr"])
         if "postprocessing" in d and isinstance(d["postprocessing"], dict):
             d["postprocessing"] = PostProcessingConfig(**d["postprocessing"])
+        if "diarization" in d and isinstance(d["diarization"], dict):
+            d["diarization"] = DiarizationConfig(**d["diarization"])
         if "evaluation" in d and isinstance(d["evaluation"], dict):
             d["evaluation"] = EvaluationConfig(**d["evaluation"])
         if "audio_files" in d and isinstance(d["audio_files"], list):
