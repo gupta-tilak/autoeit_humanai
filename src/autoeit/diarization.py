@@ -227,26 +227,22 @@ def identify_response_speaker(
     """Determine which pyannote speaker label corresponds to the non-native
     participant responding to each stimulus.
 
-    Strategy
-    --------
-    1. Detect tone boundaries (already used in Phase 1).
-    2. For each tone, look at the diarization turns in the ``window_after_tone_s``
-       window immediately following the tone end.
-    3. The speaker with the most RMS-weighted coverage across those windows
-       is the response speaker (non-native participant).
-
-    Fallback (no tones detected)
-    ----------------------------
-    Uses RMS-weighted speaking time across the SECOND HALF of the recording.
-    On EIT recordings the participant's voice dominates the second half
-    (stimuli are front-loaded and played through room speakers at lower
-    relative mic level than the participant speaking directly into the mic).
+    Strategy (tone-free — pure diarization signals)
+    ------------------------------------------------
+    1. **Per-turn average RMS** — The participant speaks directly into the
+       mic, so their turns have consistently *higher* RMS than the stimulus
+       audio which leaks from room speakers at lower relative level.
+    2. **Alternation-pattern voting** — In EIT the speakers strictly
+       alternate (stimulus → response → stimulus → …).  The speaker who
+       most often *follows* the other is the response speaker.
+    3. Results from both signals are combined; if they agree the confidence
+       is high.  On disagreement, per-turn RMS wins (stronger physical
+       signal).
 
     Returns
     -------
     DiarizationResult with ``response_speaker`` and ``stimulus_speaker`` set.
     """
-    tones = detect_tones(audio, sr, config)
     speaker_labels = sorted({t.speaker_label for t in result.turns})
 
     if not speaker_labels:
@@ -258,44 +254,50 @@ def identify_response_speaker(
         result.response_speaker = speaker_labels[0]
         return result
 
-    # Build RMS-weighted coverage dict per speaker
-    coverage: Dict[str, float] = {lbl: 0.0 for lbl in speaker_labels}
+    # ------------------------------------------------------------------
+    # Signal 1: Per-turn mean RMS  (direct mic → higher RMS)
+    # ------------------------------------------------------------------
+    per_turn_rms: Dict[str, List[float]] = {lbl: [] for lbl in speaker_labels}
+    for turn in result.turns:
+        t_start = int(turn.start_s * sr)
+        t_end = min(int(turn.end_s * sr), len(audio))
+        chunk = audio[t_start:t_end]
+        rms = float(np.sqrt(np.mean(chunk ** 2))) if len(chunk) > 0 else 0.0
+        per_turn_rms[turn.speaker_label].append(rms)
 
-    if tones:
-        # Primary strategy: post-tone windows (response speaker is active
-        # immediately after each beep)
-        for tone_start, tone_end in tones:
-            window_start = tone_end / sr
-            window_end = window_start + window_after_tone_s
-            for turn in result.turns:
-                overlap = _overlap_s(turn.start_s, turn.end_s, window_start, window_end)
-                if overlap > 0:
-                    # Weight by RMS energy so quiet stimulus bleed-through
-                    # doesn't compete with the participant's direct mic signal
-                    t_start = int(turn.start_s * sr)
-                    t_end = int(turn.end_s * sr)
-                    chunk = audio[t_start:t_end]
-                    rms = float(np.sqrt(np.mean(chunk ** 2))) if len(chunk) > 0 else 0.0
-                    coverage[turn.speaker_label] += rms * overlap
-        logger.info("  Post-tone RMS-weighted coverage per speaker: %s", coverage)
+    mean_rms = {lbl: float(np.mean(vals)) if vals else 0.0
+                for lbl, vals in per_turn_rms.items()}
+    rms_winner = max(mean_rms, key=lambda k: mean_rms[k])
+    logger.info("  Per-turn mean RMS: %s → winner: %s", mean_rms, rms_winner)
+
+    # ------------------------------------------------------------------
+    # Signal 2: Alternation pattern  (response follows stimulus)
+    # ------------------------------------------------------------------
+    sorted_turns = sorted(result.turns, key=lambda t: t.start_s)
+    follower_count: Dict[str, int] = {lbl: 0 for lbl in speaker_labels}
+    for i in range(len(sorted_turns) - 1):
+        cur_lbl = sorted_turns[i].speaker_label
+        nxt_lbl = sorted_turns[i + 1].speaker_label
+        if cur_lbl != nxt_lbl:
+            follower_count[nxt_lbl] += 1
+
+    alt_winner = max(follower_count, key=lambda k: follower_count[k])
+    logger.info("  Alternation follower counts: %s → winner: %s",
+                follower_count, alt_winner)
+
+    # ------------------------------------------------------------------
+    # Combine: agree → high confidence;  disagree → trust RMS
+    # ------------------------------------------------------------------
+    if rms_winner == alt_winner:
+        response_speaker = rms_winner
+        logger.info("  Both signals agree → response speaker: %s (high confidence)",
+                    response_speaker)
     else:
-        # Fallback: RMS-weighted time in the second half of the recording.
-        # The participant speaks directly into the mic → higher RMS per turn
-        # than the stimulus played through room speakers.
-        logger.info("  No tones found — using RMS-weighted time (second half) as proxy.")
-        audio_mid_s = (len(audio) / sr) / 2.0
-        for turn in result.turns:
-            if turn.end_s < audio_mid_s:
-                continue  # skip first half (intro, instructions)
-            t_start = int(turn.start_s * sr)
-            t_end = int(turn.end_s * sr)
-            chunk = audio[t_start:t_end]
-            rms = float(np.sqrt(np.mean(chunk ** 2))) if len(chunk) > 0 else 0.0
-            coverage[turn.speaker_label] += rms * (turn.end_s - turn.start_s)
+        response_speaker = rms_winner
+        logger.info("  Signals disagree (RMS=%s, alt=%s) → trusting RMS: %s",
+                    rms_winner, alt_winner, response_speaker)
 
-    response_speaker = max(coverage, key=lambda k: coverage[k])
     other_speakers = [lbl for lbl in speaker_labels if lbl != response_speaker]
-
     result.response_speaker = response_speaker
     result.stimulus_speaker = other_speakers[0] if other_speakers else None
 
@@ -317,18 +319,16 @@ def segments_from_diarization(
     config: SegmentationConfig,
     min_duration_s: float = 0.3,
     merge_gap_s: float = 0.8,
+    n_items: int = 30,
 ) -> List[AudioSegment]:
-    """Convert diarization turns into List[AudioSegment] numbered 1-30.
+    """Convert diarization turns into List[AudioSegment] numbered 1–N.
 
-    Steps
-    -----
+    Pure-diarization approach (no tone dependency):
     1. Filter to response-speaker turns only.
     2. Merge adjacent turns separated by < ``merge_gap_s`` seconds.
-       Default raised to 0.8 s (from 0.4 s) because non-native speakers
-       pause more within a response than native speakers.
     3. Remove very short turns (< ``min_duration_s``).
-    4. Detect tones and group response turns into 30 EIT items.
-    5. Number and return chronologically.
+    4. If more than ``n_items`` merged turns remain, keep the N longest.
+    5. Number chronologically 1–N.
     """
     # Step 1: filter to response speaker
     response_turns = [
@@ -359,15 +359,34 @@ def segments_from_diarization(
     merged = [t for t in merged if (t.end_s - t.start_s) >= min_duration_s]
     logger.info("  After merge + filter: %d candidate response turns", len(merged))
 
-    # Step 4: detect tones and group into EIT items
-    tones = detect_tones(audio, sr, config)
-    segments = _group_into_eit_items(merged, tones, audio, sr, config)
+    # Step 4: if too many, keep the N longest (sorted back by time)
+    if len(merged) > n_items:
+        logger.info(
+            "  %d turns > %d items — keeping %d longest turns",
+            len(merged), n_items, n_items,
+        )
+        merged = sorted(merged, key=lambda t: t.end_s - t.start_s, reverse=True)[:n_items]
+        merged.sort(key=lambda t: t.start_s)
 
-    # Step 5: number chronologically
-    segments.sort(key=lambda s: s.start_s)
-    for i, seg in enumerate(segments):
-        seg.sentence_number = i + 1
+    # Step 5: build AudioSegments, numbered chronologically
+    segments: List[AudioSegment] = []
+    for i, turn in enumerate(merged):
+        start_samp = int(turn.start_s * sr)
+        end_samp = min(int(turn.end_s * sr), len(audio))
+        seg_audio = audio[start_samp:end_samp].copy()
+        rms = float(np.sqrt(np.mean(seg_audio ** 2))) if len(seg_audio) > 0 else 0.0
+        segments.append(AudioSegment(
+            start_sample=start_samp,
+            end_sample=end_samp,
+            start_s=turn.start_s,
+            end_s=turn.end_s,
+            segment_type="response",
+            audio=seg_audio,
+            energy_rms=rms,
+            sentence_number=i + 1,
+        ))
 
+    logger.info("  Final: %d response segments", len(segments))
     return segments
 
 
