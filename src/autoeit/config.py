@@ -32,10 +32,10 @@ class AudioFileConfig:
 
 
 DEFAULT_AUDIO_FILES: List[AudioFileConfig] = [
-    AudioFileConfig("038010", "2A", "038010_EIT-2A.mp3", "38010-2A", skip_seconds=150.0),
-    AudioFileConfig("038011", "1A", "038011_EIT-1A.mp3", "38011-1A", skip_seconds=150.0),
-    AudioFileConfig("038012", "2A", "038012_EIT-2A.mp3", "38012-2A", skip_seconds=720.0),
-    AudioFileConfig("038015", "1A", "038015_EIT-1A.mp3", "38015-1A", skip_seconds=150.0),
+    AudioFileConfig("038010", "2A", "038010_EIT-2A.mp3", "38010-2A", skip_seconds=160.0),
+    AudioFileConfig("038011", "1A", "038011_EIT-1A.mp3", "38011-1A", skip_seconds=145.0),
+    AudioFileConfig("038012", "2A", "038012_EIT-2A.mp3", "38012-2A", skip_seconds=168.0),
+    AudioFileConfig("038015", "1A", "038015_EIT-1A.mp3", "38015-1A", skip_seconds=144.0),
 ]
 
 
@@ -96,6 +96,11 @@ class PreprocessingConfig:
 @dataclass
 class SegmentationConfig:
     """Audio segmentation parameters."""
+    # VAD merging — L2 speakers pause 1.2-1.6s mid-sentence; merge bursts
+    # closer than this so a single response isn't split into fragments.
+    merge_gap_s: float = 1.8
+    # Drop any extracted segment shorter than this (removes split artefacts).
+    min_segment_duration_s: float = 1.0
     # Silence detection
     min_silence_len_ms: int = 1500       # min silence between segments
     silence_thresh_db: int = -40         # dBFS threshold for silence
@@ -168,9 +173,9 @@ class DiarizationConfig:
     enabled: bool = False                        # opt-in — requires HF token
     hf_token: Optional[str] = None               # HF token or set HUGGINGFACE_TOKEN env var
     num_speakers: int = 2                        # 0 = auto-detect
-    min_speakers: int = 1
-    max_speakers: int = 4
-    merge_gap_s: float = 0.4                     # merge response turns closer than this
+    min_speakers: int = 2                        # EIT is always exactly 2 speakers
+    max_speakers: int = 2                        # EIT is always exactly 2 speakers
+    merge_gap_s: float = 0.8                     # non-native speakers pause more mid-sentence
     min_turn_duration_s: float = 0.3             # discard shorter turns
     window_after_tone_s: float = 2.0             # window for voting on response speaker
     model_name: str = "pyannote/speaker-diarization-3.1"

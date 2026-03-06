@@ -150,7 +150,8 @@ def run_diarization(
 
     def _run_pipeline(pipe, inp):
         if num_speakers > 0:
-            return pipe(inp, num_speakers=num_speakers)
+            return pipe(inp, num_speakers=num_speakers,
+                        min_speakers=min_speakers, max_speakers=max_speakers)
         return pipe(inp, min_speakers=min_speakers, max_speakers=max_speakers)
 
     logger.info("Running pyannote diarization (num_speakers=%s)…", num_speakers or "auto")
@@ -454,6 +455,9 @@ def segment_with_diarization(
     config: SegmentationConfig,
     hf_token: str,
     num_speakers: int = 2,
+    min_speakers: int = 2,
+    max_speakers: int = 2,
+    merge_gap_s: float = 0.8,
     word_timeline: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[List[AudioSegment], DiarizationResult]:
     """End-to-end: diarize → identify response speaker → extract segments.
@@ -464,6 +468,8 @@ def segment_with_diarization(
     config : SegmentationConfig (reused for tone detection parameters)
     hf_token : Hugging Face access token
     num_speakers : fixed number of speakers (0 = auto)
+    min_speakers / max_speakers : bounds (EIT = always 2)
+    merge_gap_s : merge response turns closer than this (0.8 s for non-native)
     word_timeline : optional full-file ASR words for pre-transcription enrichment
 
     Returns
@@ -474,15 +480,17 @@ def segment_with_diarization(
     diar_result = run_diarization(
         audio, sr, hf_token,
         num_speakers=num_speakers,
-        min_speakers=2,   # EIT is always exactly 2 speakers
-        max_speakers=2,
+        min_speakers=min_speakers,
+        max_speakers=max_speakers,
     )
 
     # 2. Identify response speaker
     diar_result = identify_response_speaker(diar_result, audio, sr, config)
 
     # 3. Build segments
-    segments = segments_from_diarization(diar_result, audio, sr, config)
+    segments = segments_from_diarization(
+        diar_result, audio, sr, config, merge_gap_s=merge_gap_s,
+    )
 
     # 4. Attach pre-transcriptions
     if word_timeline:

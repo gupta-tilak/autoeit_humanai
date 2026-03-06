@@ -24,22 +24,22 @@ audio_files:
     eit_version: "2A"
     filename: "038010_EIT-2A.mp3"
     sheet_name: "38010-2A"
-    skip_seconds: 150.0
+    skip_seconds: 160.0  # measured by ear: first "Quiero cortarme el pelo"
   - participant_id: "038011"
     eit_version: "1A"
     filename: "038011_EIT-1A.mp3"
     sheet_name: "38011-1A"
-    skip_seconds: 150.0
+    skip_seconds: 145.0  # measured by ear: first "Quiero cortarme el pelo"
   - participant_id: "038012"
     eit_version: "2A"
     filename: "038012_EIT-2A.mp3"
     sheet_name: "38012-2A"
-    skip_seconds: 720.0
+    skip_seconds: 168.0  # measured by ear: first "Quiero cortarme el pelo"
   - participant_id: "038015"
     eit_version: "1A"
     filename: "038015_EIT-1A.mp3"
     sheet_name: "38015-1A"
-    skip_seconds: 150.0
+    skip_seconds: 144.0  # measured by ear: first "Quiero cortarme el pelo"
 
 # Audio preprocessing
 preprocessing:
@@ -53,6 +53,8 @@ preprocessing:
 
 # Segmentation
 segmentation:
+  merge_gap_s: 1.8          # merge speech bursts closer than this (L2 mid-sentence pauses 1.2-1.6s)
+  min_segment_duration_s: 1.0  # discard segments shorter than this (removes split fragments)
   min_silence_len_ms: 1500
   silence_thresh_db: -40
   seek_step_ms: 10

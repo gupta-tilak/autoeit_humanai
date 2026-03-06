@@ -98,7 +98,16 @@ def segment_audio(
 
     # ---- Signal 1: Silero VAD ----
     vad_regions = _silero_vad_detect(audio, sr)
-    logger.info("  Silero VAD  -> %d speech regions", len(vad_regions))
+    logger.info("  Silero VAD  -> %d speech regions (raw)", len(vad_regions))
+
+    # Merge VAD bursts closer than merge_gap_s so mid-sentence L2 pauses
+    # (typically 1.2-1.6s) don't split a single response into fragments.
+    merge_gap_samples = int(config.merge_gap_s * sr)
+    vad_regions = _merge_close_regions(vad_regions, min_gap=merge_gap_samples)
+    logger.info(
+        "  Silero VAD  -> %d speech regions (after %.1fs merge)",
+        len(vad_regions), config.merge_gap_s,
+    )
 
     # ---- Signal 2: Tone detection ----
     tones = detect_tones(audio, sr, config)
@@ -639,7 +648,22 @@ def _extract_responses_vad_tones(
 
     items = _group_into_items(vad_regions, sr, config, tones)
     logger.info("  Grouped into %d items", len(items))
-    return _extract_responses_from_items(audio, sr, items, tones, config)
+    responses = _extract_responses_from_items(audio, sr, items, tones, config)
+
+    # Drop fragments shorter than min_segment_duration_s (split artefacts)
+    min_dur_samples = int(config.min_segment_duration_s * sr)
+    before = len(responses)
+    responses = [
+        r for r in responses
+        if (r.end_sample - r.start_sample) >= min_dur_samples
+    ]
+    dropped = before - len(responses)
+    if dropped:
+        logger.info(
+            "  Dropped %d segment(s) shorter than %.1fs",
+            dropped, config.min_segment_duration_s,
+        )
+    return responses
 
 
 def _group_into_items(
