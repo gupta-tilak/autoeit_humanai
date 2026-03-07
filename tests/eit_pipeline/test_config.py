@@ -83,7 +83,7 @@ class TestStimulusAlignmentConfig:
         config = StimulusAlignmentConfig()
         assert config.method == "cross_correlation"
         assert config.compare_all_methods is False
-        assert config.similarity_threshold == 0.5
+        assert config.similarity_threshold == 0.25
 
     def test_methods(self):
         for method in ["cross_correlation", "mfcc_cosine", "fingerprint"]:

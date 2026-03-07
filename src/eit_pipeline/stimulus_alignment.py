@@ -92,8 +92,19 @@ def align_stimuli(
     # Post-process: sort by time, remove duplicates, enforce spacing
     result.events = _post_process_events(result.events, config)
 
+    # Ensure all expected stimuli are present (interpolate missing ones)
+    n_expected = config.expected_stimuli if hasattr(config, 'expected_stimuli') else 30
+    result.events = _ensure_all_stimuli(
+        result.events,
+        n_expected=n_expected,
+        recording_duration_s=recording.duration_s,
+    )
+
     logger.info(
-        "Stimulus alignment complete: %d events detected", len(result.events),
+        "Stimulus alignment complete: %d/%d events (%d detected, %d interpolated)",
+        len(result.events), n_expected,
+        sum(1 for e in result.events if e.method != "interpolated"),
+        sum(1 for e in result.events if e.method == "interpolated"),
     )
     return result
 
@@ -571,15 +582,149 @@ def _post_process_events(
 
     events = sorted(best_by_sid.values(), key=lambda e: e.stimulus_start_s)
 
-    # Enforce minimum spacing
+    # Enforce minimum spacing — only merge events with the SAME sentence_id.
+    # Different sentence_ids should never replace each other, since consecutive
+    # stimuli are legitimately close together (often <5s apart).
     if len(events) <= 1:
         return events
 
     filtered = [events[0]]
     for event in events[1:]:
-        if event.stimulus_start_s - filtered[-1].stimulus_end_s >= config.min_stimulus_spacing_s:
+        prev = filtered[-1]
+        time_gap = event.stimulus_start_s - prev.stimulus_end_s
+        if time_gap >= config.min_stimulus_spacing_s:
             filtered.append(event)
-        elif event.confidence > filtered[-1].confidence:
-            filtered[-1] = event
+        elif event.sentence_id == prev.sentence_id:
+            # Same sentence detected twice — keep highest confidence
+            if event.confidence > prev.confidence:
+                filtered[-1] = event
+        else:
+            # Different sentence_ids that are close together — keep both
+            filtered.append(event)
 
     return filtered
+
+
+def _ensure_all_stimuli(
+    events: List[StimulusEvent],
+    n_expected: int = 30,
+    recording_duration_s: float = 0.0,
+) -> List[StimulusEvent]:
+    """Ensure all expected stimulus events are present.
+
+    If alignment detected fewer than n_expected stimuli, interpolate
+    positions for missing ones using detected events as temporal anchors.
+    Interpolated events are marked with method='interpolated' and
+    confidence=0.0 so downstream stages can identify them.
+
+    Parameters
+    ----------
+    events : list of StimulusEvent
+        Detected stimulus events (may be fewer than n_expected).
+    n_expected : int
+        Number of expected stimuli (default 30 for EIT).
+    recording_duration_s : float
+        Total recording duration for boundary clamping.
+
+    Returns
+    -------
+    list of StimulusEvent
+        Exactly n_expected events sorted by stimulus_start_s.
+    """
+    detected_by_id: Dict[int, StimulusEvent] = {e.sentence_id: e for e in events}
+
+    if len(detected_by_id) >= n_expected:
+        return sorted(
+            [detected_by_id[sid] for sid in range(1, n_expected + 1)
+             if sid in detected_by_id][:n_expected],
+            key=lambda e: e.stimulus_start_s,
+        )
+
+    detected = sorted(events, key=lambda e: e.stimulus_start_s)
+
+    # Compute average stimulus duration from detected events
+    if detected:
+        avg_duration = float(np.mean(
+            [e.stimulus_end_s - e.stimulus_start_s for e in detected]
+        ))
+        # Cap at reasonable maximum (stimulus sentences are 1-5s)
+        avg_duration = min(avg_duration, 5.0)
+    else:
+        avg_duration = 3.0
+
+    # Compute average start-to-start interval between consecutive sentence_ids
+    if len(detected) >= 2:
+        # Use total span divided by sentence_id range for a robust estimate
+        first, last = detected[0], detected[-1]
+        sid_range = last.sentence_id - first.sentence_id
+        if sid_range > 0:
+            avg_interval = (
+                last.stimulus_start_s - first.stimulus_start_s
+            ) / sid_range
+        else:
+            avg_interval = avg_duration + 7.0
+    else:
+        avg_interval = avg_duration + 7.0
+
+    logger.info(
+        "Ensuring all %d stimuli: %d detected, avg_interval=%.1fs, avg_dur=%.1fs",
+        n_expected, len(detected), avg_interval, avg_duration,
+    )
+
+    # Build complete list
+    all_events: List[StimulusEvent] = []
+
+    for sid in range(1, n_expected + 1):
+        if sid in detected_by_id:
+            all_events.append(detected_by_id[sid])
+            continue
+
+        # Interpolate position from nearest detected anchors
+        before = [(e.sentence_id, e.stimulus_start_s)
+                  for e in detected if e.sentence_id < sid]
+        after = [(e.sentence_id, e.stimulus_start_s)
+                 for e in detected if e.sentence_id > sid]
+
+        if before and after:
+            b_sid, b_start = before[-1]
+            a_sid, a_start = after[0]
+            fraction = (sid - b_sid) / (a_sid - b_sid)
+            estimated_start = b_start + fraction * (a_start - b_start)
+        elif before:
+            b_sid, b_start = before[-1]
+            estimated_start = b_start + (sid - b_sid) * avg_interval
+        elif after:
+            a_sid, a_start = after[0]
+            estimated_start = max(0, a_start - (a_sid - sid) * avg_interval)
+        else:
+            estimated_start = (sid - 1) * avg_interval
+
+        estimated_start = max(0.0, estimated_start)
+        if recording_duration_s > 0:
+            estimated_start = min(estimated_start, max(0.0, recording_duration_s - avg_duration))
+
+        all_events.append(StimulusEvent(
+            sentence_id=sid,
+            stimulus_start_s=estimated_start,
+            stimulus_end_s=estimated_start + avg_duration,
+            confidence=0.0,
+            method="interpolated",
+        ))
+
+    # Sort by time and resolve any temporal inversions
+    all_events.sort(key=lambda e: e.stimulus_start_s)
+
+    # Final pass: ensure monotonically increasing start times
+    for i in range(1, len(all_events)):
+        if all_events[i].stimulus_start_s <= all_events[i - 1].stimulus_end_s:
+            # Push this event after the previous one with a small gap
+            gap = 1.0
+            all_events[i] = StimulusEvent(
+                sentence_id=all_events[i].sentence_id,
+                stimulus_start_s=all_events[i - 1].stimulus_end_s + gap,
+                stimulus_end_s=all_events[i - 1].stimulus_end_s + gap + avg_duration,
+                confidence=all_events[i].confidence,
+                method=all_events[i].method,
+            )
+
+    return all_events

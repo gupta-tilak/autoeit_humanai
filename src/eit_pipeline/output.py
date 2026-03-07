@@ -80,20 +80,23 @@ def assemble_results(
     if stimulus_sentences is None:
         stimulus_sentences = TARGET_SENTENCES
 
-    # Index transcriptions and flags by sentence_id
+    # Index transcriptions, flags, and responses by sentence_id
     trans_by_id = {t.sentence_id: t for t in transcriptions}
     flags_by_id = {f.sentence_id: f for f in leakage_flags}
+    resp_by_id = {r.sentence_id: r for r in responses}
 
+    # Always produce one entry per expected sentence (1..30)
     segments = []
-    for resp in responses:
-        sid = resp.sentence_id
-        stim_text = stimulus_sentences[sid - 1] if 1 <= sid <= len(stimulus_sentences) else ""
+    n_expected = len(stimulus_sentences)
 
+    for sid in range(1, n_expected + 1):
+        stim_text = stimulus_sentences[sid - 1]
+        resp = resp_by_id.get(sid)
         trans = trans_by_id.get(sid)
         flag = flags_by_id.get(sid)
 
         transcript = trans.transcript if trans else "[no response]"
-        confidence = resp.confidence
+        confidence = resp.confidence if resp else 0.0
         avg_log_prob = trans.avg_log_prob if trans else 0.0
         no_speech_prob = trans.no_speech_prob if trans else 0.0
         processing_time = trans.processing_time_s if trans else 0.0
@@ -104,10 +107,10 @@ def assemble_results(
         segments.append(SegmentResult(
             sentence_id=sid,
             stimulus_text=stim_text,
-            stimulus_start_s=resp.stimulus_start_s,
-            stimulus_end_s=resp.stimulus_end_s,
-            response_start_s=resp.response_start_s,
-            response_end_s=resp.response_end_s,
+            stimulus_start_s=resp.stimulus_start_s if resp else 0.0,
+            stimulus_end_s=resp.stimulus_end_s if resp else 0.0,
+            response_start_s=resp.response_start_s if resp else 0.0,
+            response_end_s=resp.response_end_s if resp else 0.0,
             transcript=transcript,
             confidence=confidence,
             avg_log_prob=avg_log_prob,

@@ -63,11 +63,13 @@ stimulus_alignment:
   n_mfcc: 20
   # Sliding window step (seconds) for MFCC method
   window_step_s: 0.1
-  # Thresholds
-  similarity_threshold: 0.5
-  min_stimulus_spacing_s: 5.0
-  peak_prominence: 0.3
-  peak_distance_s: 5.0
+  # Thresholds — lower values to detect stimuli played at low volume from external devices
+  similarity_threshold: 0.25
+  min_stimulus_spacing_s: 3.0
+  peak_prominence: 0.15
+  peak_distance_s: 3.0
+  # Expected number of stimuli per recording
+  expected_stimuli: 30
   # Fingerprinting
   fingerprint_fan_value: 15
   fingerprint_freq_bins: 64

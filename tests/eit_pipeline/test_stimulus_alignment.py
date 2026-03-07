@@ -40,13 +40,23 @@ class TestPostProcessEvents:
     def test_enforce_spacing(self):
         events = [
             StimulusEvent(1, 0.0, 2.0, 0.9, "test"),
-            StimulusEvent(2, 2.5, 4.5, 0.8, "test"),  # too close (< 5s spacing)
+            StimulusEvent(2, 2.5, 4.5, 0.8, "test"),  # close but DIFFERENT sentence_id
         ]
         config = StimulusAlignmentConfig(min_stimulus_spacing_s=5.0)
         result = _post_process_events(events, config)
-        # Higher confidence one should survive
+        # Different sentence_ids should both be preserved
+        assert len(result) == 2
+
+    def test_enforce_spacing_same_sid(self):
+        events = [
+            StimulusEvent(1, 0.0, 2.0, 0.9, "test"),
+            StimulusEvent(1, 2.5, 4.5, 0.8, "test"),  # same sentence_id, close
+        ]
+        config = StimulusAlignmentConfig(min_stimulus_spacing_s=5.0)
+        result = _post_process_events(events, config)
+        # Same sentence_id: keep highest confidence
         assert len(result) == 1
-        assert result[0].sentence_id == 1
+        assert result[0].confidence == 0.9
 
     def test_empty_events(self):
         config = StimulusAlignmentConfig()
@@ -77,7 +87,10 @@ class TestAlignStimuli:
         )
         config = StimulusAlignmentConfig()
         result = align_stimuli(recording, {}, config)
-        assert len(result.events) == 0
+        # With no stimulus audio, all 30 events are interpolated
+        assert len(result.events) == 30
+        assert all(e.method == "interpolated" for e in result.events)
+        assert all(e.confidence == 0.0 for e in result.events)
 
 
 class TestLoadStimulusAudio:

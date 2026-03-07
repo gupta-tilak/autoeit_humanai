@@ -104,13 +104,16 @@ class StimulusAlignmentConfig:
     n_mfcc: int = 20
     # Sliding window parameters (for MFCC cosine)
     window_step_s: float = 0.1
-    # Similarity thresholds
-    similarity_threshold: float = 0.5
-    # Duplicate suppression: minimum time between two stimulus detections (seconds)
-    min_stimulus_spacing_s: float = 5.0
+    # Similarity thresholds — lower values detect more stimuli
+    # (especially important when stimulus is played from external device at low volume)
+    similarity_threshold: float = 0.25
+    # Duplicate suppression: minimum time between two detections of the SAME stimulus
+    min_stimulus_spacing_s: float = 3.0
     # Peak detection
-    peak_prominence: float = 0.3
-    peak_distance_s: float = 5.0
+    peak_prominence: float = 0.15
+    peak_distance_s: float = 3.0
+    # Expected number of stimuli per recording
+    expected_stimuli: int = 30
     # Fingerprinting
     fingerprint_fan_value: int = 15
     fingerprint_freq_bins: int = 64
