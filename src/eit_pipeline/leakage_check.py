@@ -25,6 +25,9 @@ class LeakageFlag:
     similarity_score: float
     flagged: bool
     reason: str
+    # True when similarity >= discard_threshold: segment should be cleared
+    # (replaced with "[stimulus echo \u2014 discarded]") in the final output.
+    should_discard: bool = False
 
 
 def check_leakage(
@@ -86,12 +89,20 @@ def check_leakage(
             trans.transcript, stimulus_text, config.similarity_method,
         )
 
+        discard_threshold = getattr(config, "discard_threshold", 0.90)
+        should_discard = similarity >= discard_threshold
         flagged = similarity >= config.similarity_threshold
         reason = ""
-        if flagged:
+        if should_discard:
+            reason = f"stimulus_echo_discard(sim={similarity:.2f})"
+            logger.warning(
+                "Stimulus echo DISCARDED for sentence %d: sim=%.2f '%s'",
+                sid, similarity, trans.transcript[:50],
+            )
+        elif flagged:
             reason = f"stimulus_echo(sim={similarity:.2f})"
             logger.warning(
-                "Stimulus leakage detected for sentence %d: sim=%.2f '%s'",
+                "Stimulus leakage flagged for sentence %d: sim=%.2f '%s'",
                 sid, similarity, trans.transcript[:50],
             )
 
@@ -102,6 +113,7 @@ def check_leakage(
             similarity_score=similarity,
             flagged=flagged,
             reason=reason,
+            should_discard=should_discard,
         ))
 
     flagged_count = sum(1 for f in flags if f.flagged)

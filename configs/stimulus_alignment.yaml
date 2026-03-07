@@ -87,11 +87,22 @@ silence_detection:
   merge_gap_s: 1.8
 
 # Stage 4: Response Window Construction
+# Hybrid strategy: stimulus timestamps define a safe search zone; the first
+# VAD speech segment found inside that zone becomes the response boundary.
+#
+# post_stimulus_gap_s  : time after stimulus end before the zone opens
+#                        (absorbs small timestamp errors, keeps stimulus audio out)
+# pre_stimulus_gap_s   : time before next stimulus start where zone closes
+# min / max_response   : hard EIT duration limits (~1–5 s for native repetition)
+# merge_gap_s          : pauses ≤ this are merged (learner hesitates mid-sentence)
 response_window:
-  min_response_duration_s: 0.2
-  max_response_duration_s: 15.0
-  padding_before_s: 0.1
-  padding_after_s: 0.2
+  post_stimulus_gap_s: 0.3
+  pre_stimulus_gap_s: 0.3
+  min_response_duration_s: 0.8
+  max_response_duration_s: 6.0
+  merge_gap_s: 1.0
+  padding_before_s: 0.05
+  padding_after_s: 0.1
   expected_responses: 30
 
 # Stage 5: VAD Refinement
@@ -136,9 +147,12 @@ asr:
   batch_size: 8
 
 # Stage 8: Leakage Check
+# similarity_threshold : flag as potential leakage
+# discard_threshold    : similarity at which the transcript is hard-discarded
 leakage_check:
   enabled: true
   similarity_threshold: 0.85
+  discard_threshold: 0.90
   similarity_method: "rapidfuzz"
 
 # Stage 9: Output

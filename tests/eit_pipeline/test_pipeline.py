@@ -28,21 +28,32 @@ class TestResponseWindowBuilder:
         responses = build_response_windows(stimuli, speech)
         assert len(responses) == 3
         assert responses[0].sentence_id == 1
-        assert responses[0].response_start_s > 0
+        # response is anchored on the VAD segment start (with tiny padding back)
+        assert responses[0].response_start_s <= 3.0
+        assert responses[0].response_start_s >  2.0  # never in stimulus territory
         assert responses[1].sentence_id == 2
         assert responses[2].sentence_id == 3
 
     def test_no_speech_for_stimulus(self):
+        """If no VAD segment falls inside the safe zone, result is no-response.
+
+        This is the hybrid strategy: stimulus timestamps define where to look,
+        but a real voiced anchor is required to define the response.
+        """
         stimuli = self._make_stimulus_events()
         speech = [
-            SpeechSegment(3.0, 5.0),   # response to stimulus 1 only
+            SpeechSegment(3.0, 5.0),   # only in the gap after stimulus 1
         ]
 
         responses = build_response_windows(stimuli, speech)
         assert len(responses) == 3
-        # Stimulus 2 and 3 should have no response
+        # Stimulus 1 produces a response (VAD found)
+        assert responses[0].response_end_s > 0.0
+        # Stimuli 2 and 3 have no VAD in their zones → no-response
         assert responses[1].response_end_s == 0.0
         assert responses[2].response_end_s == 0.0
+        assert responses[1].speech_segments_used == 0
+        assert responses[2].speech_segments_used == 0
 
     def test_empty_stimuli(self):
         responses = build_response_windows([], [SpeechSegment(1.0, 2.0)])
@@ -53,21 +64,34 @@ class TestResponseWindowBuilder:
             StimulusEvent(1, 0.0, 2.0, 0.9, "test"),
             StimulusEvent(2, 5.0, 7.0, 0.9, "test"),
         ]
+        # Speech segment crosses into the next stimulus zone; should be capped.
         speech = [
-            SpeechSegment(2.5, 6.0),  # overlaps with stimulus 2
+            SpeechSegment(2.5, 6.0),  # starts in zone 1, but very long
         ]
 
         responses = build_response_windows(stimuli, speech)
-        # Response for stimulus 1 should be trimmed before stimulus 2
+        # Response 1 must end before stimulus 2 starts
         assert responses[0].response_end_s <= stimuli[1].stimulus_start_s
 
     def test_duration_constraints(self):
-        stimuli = [StimulusEvent(1, 0.0, 2.0, 0.9, "test")]
-        speech = [SpeechSegment(2.1, 2.15)]  # very short
+        """Windows shorter than min_response_duration_s are rejected.
 
-        config = ResponseWindowConfig(min_response_duration_s=0.5)
+        Two stimuli placed very close together produce a tiny inter-stimulus
+        gap; after subtracting the pre/post gaps the remaining window is shorter
+        than the minimum and should be marked as no-response.
+        """
+        # S1 ends at 2.0 s; S2 starts at 2.7 s.
+        # response_start = 2.0 + 0.4 = 2.4
+        # response_end   = 2.7 - 0.4 = 2.3  →  duration = -0.1 s  (invalid)
+        stimuli = [
+            StimulusEvent(1, 0.0, 2.0, 0.9, "test"),
+            StimulusEvent(2, 2.7, 4.5, 0.9, "test"),
+        ]
+        speech = [SpeechSegment(2.1, 2.5)]  # small speech burst in tiny gap
+
+        config = ResponseWindowConfig(min_response_duration_s=0.7)
         responses = build_response_windows(stimuli, speech, config)
-        # Should be marked as no response due to short duration
+        # Stimulus 1 window is too short → marked as no response
         assert responses[0].response_end_s == 0.0
 
 

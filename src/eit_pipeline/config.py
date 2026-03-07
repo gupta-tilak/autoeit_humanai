@@ -140,11 +140,21 @@ class SilenceDetectionConfig:
 @dataclass
 class ResponseWindowConfig:
     """Response window construction parameters."""
-    min_response_duration_s: float = 0.2
-    max_response_duration_s: float = 15.0
-    # Padding
-    padding_before_s: float = 0.1
-    padding_after_s: float = 0.2
+    # ── Stimulus-anchor gaps ─────────────────────────────────────────────
+    # Minimum time after stimulus ends before the search window opens.
+    # Should be >= expected timestamp error of the alignment stage.
+    post_stimulus_gap_s: float = 0.3
+    # Time before the *next* stimulus starts where the search window closes.
+    pre_stimulus_gap_s: float = 0.3
+    # ── Hard duration constraints (EIT responses: ~1–5 s) ────────────────
+    min_response_duration_s: float = 0.8
+    max_response_duration_s: float = 6.0
+    # ── Speech-segment merging (learner may pause mid-sentence) ──────────
+    # Consecutive VAD segments closer than this are merged into one response.
+    merge_gap_s: float = 1.0
+    # ── Small padding applied to the final segment edges ────────────────
+    padding_before_s: float = 0.05
+    padding_after_s: float = 0.1
     expected_responses: int = 30
 
 
@@ -205,7 +215,11 @@ class ASRConfig:
 class LeakageCheckConfig:
     """Stimulus leakage check parameters."""
     enabled: bool = True
+    # Segments with similarity >= this are flagged as possible leakage
     similarity_threshold: float = 0.85
+    # Segments with similarity >= this are hard-discarded (cleared to
+    # "[stimulus echo — discarded]"); must be >= similarity_threshold
+    discard_threshold: float = 0.90
     # Library: rapidfuzz or jiwer
     similarity_method: str = "rapidfuzz"
 

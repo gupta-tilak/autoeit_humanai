@@ -104,6 +104,11 @@ def assemble_results(
         flagged = flag.flagged if flag else False
         flag_reason = flag.reason if flag else ""
 
+        # Hard discard: replace transcript when the response is too similar
+        # to the stimulus text (ASR transcribed stimulus audio, not participant)
+        if flag and flag.should_discard:
+            transcript = "[stimulus echo \u2014 discarded]"
+
         segments.append(SegmentResult(
             sentence_id=sid,
             stimulus_text=stim_text,

@@ -65,8 +65,14 @@ def refine_boundaries(
             refined.append(resp)
             continue
 
-        # Expand window
-        exp_start = max(0, resp.response_start_s - config.expand_window_s)
+        # Expand window for better boundary detection,
+        # but never back into stimulus territory.
+        # resp.stimulus_end_s is the hard lower bound: any audio at or before
+        # that point belongs to the stimulus, not the participant.
+        exp_start = max(
+            resp.stimulus_end_s,                              # hard floor
+            resp.response_start_s - config.expand_window_s,  # expansion
+        )
         exp_end = min(
             recording.duration_s,
             resp.response_end_s + config.expand_window_s,
