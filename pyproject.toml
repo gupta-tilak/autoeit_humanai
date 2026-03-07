@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "autoeit"
+name = "eit-pipeline"
 version = "0.1.0"
-description = "Automated Elicited Imitation Task (EIT) transcription pipeline for non-native Spanish speakers"
+description = "Stimulus-alignment EIT audio processing pipeline for non-native Spanish speaker recordings"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
@@ -38,7 +38,6 @@ all = ["mlx>=0.5.0", "mlx-whisper>=0.1.0", "pywhispercpp>=1.0.0", "faster-whispe
        "jupyter>=1.0.0", "ipykernel>=6.0.0", "matplotlib>=3.7.0", "ipywidgets>=8.0.0"]
 
 [project.scripts]
-autoeit = "autoeit.__main__:main"
 eit-pipeline = "eit_pipeline.__main__:main"
 
 [tool.setuptools.packages.find]

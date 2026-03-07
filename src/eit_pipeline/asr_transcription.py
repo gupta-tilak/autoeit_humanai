@@ -185,17 +185,10 @@ def _load_asr_model(config: ASRConfig) -> Any:
         return {"backend": "faster_whisper", "model": model}
 
     else:
-        # Fallback to existing autoeit ASR factory
-        try:
-            from autoeit.asr.factory import create_asr_backend
-            backend = create_asr_backend(config)
-            backend.load_model()
-            return {"backend": "autoeit", "model": backend}
-        except ImportError:
-            raise ImportError(
-                f"ASR backend '{config.backend}' not available. "
-                f"Try mlx_whisper or faster_whisper."
-            )
+        raise ValueError(
+            f"ASR backend '{config.backend}' is not supported. "
+            f"Supported backends: 'mlx_whisper', 'faster_whisper'."
+        )
 
 
 def _transcribe_segment(
@@ -210,8 +203,6 @@ def _transcribe_segment(
         return _transcribe_mlx(audio, sr, model["repo"], config, temperature)
     elif model["backend"] == "faster_whisper":
         return _transcribe_faster_whisper(audio, sr, model["model"], config, temperature)
-    elif model["backend"] == "autoeit":
-        return _transcribe_autoeit(audio, sr, model["model"], config, temperature)
     else:
         raise ValueError(f"Unknown ASR backend: {model['backend']}")
 
@@ -318,21 +309,4 @@ def _transcribe_faster_whisper(
         "avg_log_prob": float(avg_log_prob),
         "no_speech_prob": float(no_speech_prob),
         "words": words,
-    }
-
-
-def _transcribe_autoeit(
-    audio: np.ndarray,
-    sr: int,
-    backend: Any,
-    config: ASRConfig,
-    temperature: float,
-) -> Dict:
-    """Transcribe using the existing autoeit ASR backend."""
-    result = backend.transcribe_segment(audio, sr)
-    return {
-        "text": result.text,
-        "avg_log_prob": float(result.avg_log_prob),
-        "no_speech_prob": float(result.no_speech_prob),
-        "words": [],
     }
