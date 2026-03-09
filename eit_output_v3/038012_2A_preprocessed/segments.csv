@@ -1,0 +1,31 @@
+﻿stimulus_id,stimulus_text,response_start,response_end,response_duration,status,validation,response_file
+1,Quiero cortarme el pelo,2.9,4.2,1.3,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_01.wav
+2,El libro está en la mesa,10.0,11.7,1.7,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_02.wav
+3,El carro lo tiene Pedro,17.4,19.0,1.6,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_03.wav
+4,El se ducha cada mañana,25.2,27.0,1.8,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_04.wav
+5,¿Qué dice usted que va a hacer hoy?,34.5,36.3,1.8,OK,SUSPICIOUSLY_SHORT(≥2.1s expected),eit_output_v3/038012_2A_preprocessed/responses/response_05.wav
+6,Dudo que sepa manejar muy bien,43.5,47.4,3.9,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_06.wav
+7,Las calles de esta ciudad son muy anchas,53.7,59.9,6.2,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_07.wav
+8,Puede que llueva mañana todo el día,65.3,67.6,2.3,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_08.wav
+9,Las casas son muy bonitas pero caras,76.1,78.4,2.3,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_09.wav
+10,Me gustan las películas que acaban bien,87.7,90.8,3.1,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_10.wav
+11,El chico con el que yo salgo es español,99.8,105.1,5.3,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_11.wav
+12,Después de cenar me fui a dormir tranquilo,111.9,118.4,6.5,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_12.wav
+13,Quiero una casa en la que vivan mis animales,124.0,128.2,4.2,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_13.wav
+14,A nosotros nos fascinan las fiestas grandiosas,137.2,142.0,4.8,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_14.wav
+15,Ella sólo bebe cerveza y no come nada,150.9,157.4,6.5,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_15.wav
+16,Me gustaría que el precio de las casas bajara,164.4,170.8,6.4,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_16.wav
+17,Cruza a la derecha y después sigue todo recto,178.6,184.3,5.7,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_17.wav
+18,Ella ha terminado de pintar su apartamento,192.6,198.4,5.8,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_18.wav
+19,Me gustaría que empezara a hacer más calor pronto,205.5,212.1,6.6,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_19.wav
+20,El niño al que se le murió el gato está triste,219.0,224.6,5.6,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_20.wav
+21,Una amiga mía cuida a los niños de mi vecino,233.3,238.4,5.1,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_21.wav
+22,El gato que era negro fue perseguido por el perro,247.7,254.2,6.5,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_22.wav
+23,Antes de poder salir él tiene que limpiar su cuarto,263.2,265.9,2.7,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_23.wav
+24,La cantidad de personas que fuman ha disminuido,278.6,284.1,5.5,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_24.wav
+25,Después de llegar a casa del trabajo tomé la cena,294.1,299.7,5.6,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_25.wav
+26,El ladrón al que atrapó la policía era famoso,310.1,311.8,1.7,OK,SUSPICIOUSLY_SHORT(≥2.4s expected),eit_output_v3/038012_2A_preprocessed/responses/response_26.wav
+27,Le pedí a un amigo que me ayudara con la tarea,325.4,330.0,4.6,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_27.wav
+28,El examen no fue tan difícil como me habían dicho,342.5,347.3,4.8,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_28.wav
+29,¿Serías tan amable de darme el libro que está en la mesa?,356.0,364.0,8.0,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_29.wav
+30,Hay mucha gente que no toma nada para el desayuno,371.0,379.1,8.1,OK,OK,eit_output_v3/038012_2A_preprocessed/responses/response_30.wav
