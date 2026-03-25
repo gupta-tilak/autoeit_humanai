@@ -1,0 +1,13 @@
+﻿Model,Family,Params (M),Prompt,N_files,N_errors,Mean WER,Median WER,Std WER,Mean CER,Mean Learner Score,Mean RTF,Mean Elapsed (s),Total Time (s)
+Whisper tiny,Whisper,39,Yes,120,0,0.3971,0.3333,0.3527,0.2905,0.6029,0.044,0.17,20.4
+Whisper base,Whisper,74,Yes,120,0,0.3961,0.3541,0.3626,0.2885,0.6039,0.057,0.217,26.1
+Whisper small,Whisper,244,Yes,120,0,0.3421,0.2,0.3523,0.2621,0.6579,0.093,0.354,42.5
+Whisper medium,Whisper,769,Yes,120,0,0.3474,0.2361,0.3496,0.2602,0.6526,0.518,1.979,237.5
+Whisper large-v2,Whisper,1550,Yes,120,0,0.3631,0.2928,0.3439,0.2701,0.6369,1.023,3.906,468.7
+Whisper large-v3,Whisper,1550,Yes,120,0,0.4029,0.3693,0.3433,0.2933,0.5971,0.556,2.125,255.0
+Whisper large-v3-turbo,Whisper,809,Yes,120,0,0.383,0.3333,0.3417,0.2878,0.617,0.571,2.181,261.7
+faster-whisper large-v3,faster-whisper,1550,Yes,120,0,0.4075,0.3875,0.349,0.2928,0.5925,2.229,8.514,1021.7
+wav2vec2-large-es (jonatasgrosman),Wav2Vec2,317,No,120,0,0.5433,0.5635,0.2941,0.3506,0.4567,0.129,0.492,59.0
+MMS-1B-all,MMS,1000,No,120,0,0.5925,0.6,0.3001,0.3605,0.4075,5.775,22.055,2646.6
+wav2vec2-XLS-R-1B-es,Wav2Vec2,1000,No,120,0,0.5574,0.5635,0.2897,0.3459,0.4426,4.878,18.63,2235.6
+MMS-1B-fl102,MMS,1000,No,120,0,0.8114,0.8889,0.2357,0.5145,0.1886,4.542,17.348,2081.7
